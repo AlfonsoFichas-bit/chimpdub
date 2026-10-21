@@ -38,7 +38,7 @@ El sistema SHALL instruir al modelo para que recorte, por este orden, muletillas
 - **THEN** el sistema la considera no conforme con la política de adaptación
 
 ### Requirement: La salida del modelo es JSON estructurado y validable
-El sistema SHALL solicitar la salida del modelo mediante `generationConfig` con `responseMimeType: "application/json"` y un `responseSchema` que defina un array de objetos con las propiedades `start`, `end`, `text`, `words` y `source`, y SHALL parsear la respuesta como JSON.
+El sistema SHALL solicitar la salida del modelo mediante la Interactions API (`POST /v1beta/interactions`) con `response_format: { type: "text", mime_type: "application/json", schema }`, donde `schema` es JSON Schema estándar que define un array de objetos con las propiedades `start`, `end`, `text`, `words` y `source`, y SHALL leer el texto generado del paso `model_output` de la respuesta.
 
 #### Scenario: Respuesta conforme con el esquema
 - **WHEN** el modelo devuelve un array de objetos con todas las propiedades requeridas
@@ -47,6 +47,24 @@ El sistema SHALL solicitar la salida del modelo mediante `generationConfig` con 
 #### Scenario: Respuesta no parseable
 - **WHEN** la respuesta del modelo no es JSON válido o no respeta el esquema
 - **THEN** el sistema la descarta, reintenta el bloque y, si persiste el fallo, degrada a texto original
+
+### Requirement: La llamada al modelo se hace por HTTP directo y sin SDK
+El sistema SHALL llamar a la API de Gemini con `fetch` nativo desde el service worker, sin incorporar un SDK de cliente, y SHALL enviar la clave en la cabecera `x-goog-api-key`.
+
+#### Scenario: El bundle no incluye SDK de Gemini
+- **WHEN** se inspecciona el bundle generado del service worker
+- **THEN** no contiene ninguna librería cliente de la API de Gemini
+
+#### Scenario: La petición se origina en el service worker
+- **WHEN** se pide una traducción
+- **THEN** la petición a `generativelanguage.googleapis.com` la emite el service worker
+
+### Requirement: El contenido enviado al modelo no se almacena en el servidor
+El sistema SHALL enviar `store: false` en la petición, de modo que las interacciones no se retengan en el servidor de Google más allá de la propia respuesta.
+
+#### Scenario: Petición con store desactivado
+- **WHEN** se realiza una traducción
+- **THEN** el cuerpo de la petición incluye `store: false`
 
 ### Requirement: Las líneas adaptadas son monotónicas y no se solapan
 El sistema SHALL validar que las líneas adaptadas devueltas tienen `end` mayor que `start`, que sus tiempos son monotónicos crecientes y que ninguna línea se solapa con la anterior. Las líneas inválidas SHALL ser corregidas por el modelo (que devuelve sus propios tiempos) o descartadas.

@@ -14,7 +14,7 @@ La oportunidad es una extensión de navegador que **hereda la petición ya atest
 - **Reescritura del popup SolidJS**: formulario de API key (persistida en `storage.local`, nunca expuesta a la página), idioma destino, motor TTS, voz, nivel de compresión y estado de la traducción.
 - **Cascada de 4 rutas de extracción** con escalada automática y **verificador de completitud** contra `videoDetails.lengthSeconds`, de modo que nunca se acepte en silencio una pista truncada.
 - **Parsers de subtítulos** para `json3`, `srv3`, `srv1` y `vtt` (el endpoint **no** devuelve SRT) + limpieza de entidades HTML, tags de formato y timestamps inline.
-- **Pipeline de adaptación** con `gemini-3.5-flash-lite` y *structured output* (`responseMimeType` + `responseSchema`), presupuesto de palabras por cue (`floor(dur × 2,9 × 0,92)`), chunking progresivo en ventanas de 120 s con look-ahead de 45 s, validación en cliente, reintento y fallback al texto original.
+- **Pipeline de adaptación** con `gemini-3.5-flash-lite` contra la Interactions API (`POST /v1beta/interactions`) y *structured output* (`response_format` con JSON Schema estándar), presupuesto de palabras por cue (`floor(dur × 2,9 × 0,92)`), chunking progresivo en ventanas de 120 s con look-ahead de 45 s, validación en cliente, reintento y fallback al texto original.
 - **Motor de sincronización** con `requestVideoFrameCallback` y puntero monótono de cues (nunca igualdad de timestamps), con detección de seek, cancelación de locución en curso y retimificación de las líneas.
 - **Overlay in-page** (shadow root) con el estado del pipeline y los subtítulos traducidos sincronizados.
 - **Restricción de alcance**: este cambio entrega el pipeline completo hasta los **subtítulos traducidos y sincronizados**. La locución con TTS (motor navegador y motor Gemini) y el pulido de UX quedan para cambios posteriores, listados en *Fuera de alcance*.
@@ -49,7 +49,7 @@ La oportunidad es una extensión de navegador que **hereda la petición ya atest
 - Ninguna nueva. Se usan `wxt` 0.21.4, `solid-js` y `browser` (ya disponibles). La API de Gemini se consume por HTTP directo desde el service worker.
 
 **Sistemas externos**
-- `generativelanguage.googleapis.com` — `POST /v1beta/models/gemini-3.5-flash-lite:generateContent` con header `x-goog-api-key`.
+- `generativelanguage.googleapis.com` — `POST /v1beta/interactions` con header `x-goog-api-key`, sin SDK de cliente.
 - YouTube (`youtube.com/watch`) — se observa la red del reproductor; no se modifica el vídeo ni se altera la cuenta del usuario.
 
 **Coste esperado**: ~$0,006 por cada 10 min de vídeo traducido (~$0,03/hora) con el modelo `flash-lite`. En free tier es $0, con la salvedad de que Google usa el contenido para mejorar sus productos.

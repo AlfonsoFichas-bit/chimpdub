@@ -144,7 +144,7 @@ chimpdub/
       │                        │
       │                        ▼
       │              [background] ──► Gemini 3.5 Flash-Lite
-      │                                 generationConfig.responseSchema
+      │                                 Interactions API + response_format.schema
       │                                 (structured output: no puede romper formato)
       │                        │
       │                        ▼
@@ -203,8 +203,8 @@ Cada fase tiene un **criterio de aceptación** verificable. No se empieza la sig
 ### Fase 2 — Traducción y adaptación
 
 **Qué:**
-- `background.ts`: `POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent` con header `x-goog-api-key`.
-- `generationConfig.responseMimeType: 'application/json'` + `responseSchema` (§5.2.3) — **structured output**, el modelo no puede devolver formato inválido.
+- `background.ts`: `POST https://generativelanguage.googleapis.com/v1beta/interactions` con header `x-goog-api-key` (Interactions API, GA desde junio 2026; `generateContent` queda como legacy).
+- `response_format: { type: 'text', mime_type: 'application/json', schema }` (§5.2.3) — **structured output** con JSON Schema estándar, el modelo no puede devolver formato inválido. Se envía `store: false` y `thinking_level: 'minimal'`.
 - System instruction con presupuesto de palabras (§5.2.1), permitir fusión/división de cues.
 - Chunking progresivo: ventanas de 120 s con look-ahead de 45 s y contexto de cola del bloque anterior.
 - Validación en cliente + 1 reintento con prompt más estricto + fallback al texto original.
@@ -487,31 +487,65 @@ REGLAS
    deben ser monotónicos crecientes y no solaparse.
 ```
 
-#### 5.2.3 Structured output (structured outputs)
+#### 5.2.3 Structured output sobre la Interactions API
 
-```json
+> **Actualización 2026-10-21:** la Interactions API es GA desde junio de 2026 y la recomendada para proyectos nuevos; `generateContent` pasa a ser **legacy** (aunque sigue soportada). `gemini-3.5-flash-lite` está en la lista de modelos soportados por `CreateInteraction`.
+
+**Endpoint:** `POST https://generativelanguage.googleapis.com/v1beta/interactions` con cabecera `x-goog-api-key`. **Sin SDK**: `fetch` nativo desde el service worker.
+
+```jsonc
 {
-  "generationConfig": {
-    "responseMimeType": "application/json",
-    "responseSchema": {
-      "type": "ARRAY",
+  "model": "gemini-3.5-flash-lite",
+  "input": [
+    { "type": "user_input", "content": [{ "type": "text", "text": "<cues + presupuestos>" }] }
+  ],
+  "system_instruction": "<instrucción de adaptación>",
+  "response_format": {
+    "type": "text",
+    "mime_type": "application/json",
+    "schema": {                        // JSON Schema estándar, tipos en minúsculas
+      "type": "array",
       "items": {
-        "type": "OBJECT",
+        "type": "object",
         "properties": {
-          "start":  { "type": "NUMBER" },
-          "end":    { "type": "NUMBER" },
-          "text":   { "type": "STRING" },
-          "words":  { "type": "INTEGER" },
-          "source": { "type": "ARRAY", "items": { "type": "INTEGER" } }
+          "start":  { "type": "number" },
+          "end":    { "type": "number" },
+          "text":   { "type": "string" },
+          "words":  { "type": "integer" },
+          "source": { "type": "array", "items": { "type": "integer" } }
         },
         "required": ["start", "end", "text", "words", "source"]
       }
     }
-  }
+  },
+  "generation_config": { "thinking_level": "minimal" },
+  "store": false                       // no retener los subtítulos en el servidor
 }
 ```
 
-Con `responseSchema`, el modelo **no puede** devolver un formato que rompa el parser. Esto elimina de raíz el requisito del plan v1 de "asegurar que devuelva la misma estructura sin romper el formato".
+**Respuesta** (el texto va en el paso `model_output`):
+
+```jsonc
+{
+  "id": "v1_...",
+  "status": "completed",
+  "steps": [
+    { "type": "model_output", "content": [{ "type": "text", "text": "[{...}]" }] }
+  ],
+  "usage": { "total_input_tokens": 1200, "total_output_tokens": 980 }
+}
+```
+
+Con `response_format.schema`, el modelo **no puede** devolver un formato que rompa el parser. Esto elimina de raíz el requisito del plan v1 de "asegurar que devuelva la misma estructura sin romper el formato".
+
+Ventajas frente a `generateContent` + `responseSchema`:
+
+| | Interactions API | generateContent (legacy) |
+|---|---|---|
+| Estado | GA, recomendada | Legacy, soportada |
+| Dialecto del esquema | JSON Schema estándar (`"type": "array"`) | Subconjunto OpenAPI (`"type": "ARRAY"`) |
+| Privacidad | `store: false` | — |
+| Latencia / coste | `thinking_level: "minimal"` | `thinkingConfig` aparte |
 
 `source` guarda los índices de los cues originales fusionados: invaluable para depuración y para el fallback de subtítulos.
 
@@ -884,7 +918,7 @@ Precios verificados en la tabla oficial de la Gemini API (Oct 2026).
 | Obtención de subtítulos | `fetch` a `ytplayer.config` | Intercepción MAIN world + patch de URL `fmt=json3` + 4 rutas + verificador |
 | Formato | SRT/JSON | `json3` / `srv3` / `srv1` / `vtt` (no SRT) |
 | Modelo | `gemini-2.5-flash` | `gemini-3.5-flash-lite` + `gemini-3.8-flash-lite-tts` |
-| Salida del modelo | "mismos timestamps, que no rompa el formato" | `responseSchema` (structured output) + `start`/`end` propios + `source` |
+| Salida del modelo | "mismos timestamps, que no rompa el formato" | Interactions API + `response_format.schema` (JSON Schema estándar) + `start`/`end` propios + `source` |
 | Criterio de compresión | "recorta drásticamente" | Presupuesto de palabras por cue + fusión/división + validación |
 | Traducción | Por lotes, sin specify ventana | Ventanas de 120 s con look-ahead 45 s y contexto de cola |
 | TTS | `speechSynthesis` | Dual: navegador (con mitigaciones) + Gemini TTS |

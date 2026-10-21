@@ -4,7 +4,7 @@
 - [ ] 1.2 Eliminar `entrypoints/content.ts` (stub de `*.google.com`) y crear `entrypoints/youtube.content.ts` con `matches: ['*://*.youtube.com/*']` y `run_at: 'document_start'`
 - [ ] 1.3 Crear `entrypoints/yt-main-world.ts` como unlisted script (`defineUnlistedScript`) con un esqueleto que escuche el evento del bridge
 - [ ] 1.4 Definir en `utils/types.ts` los tipos `Cue`, `DubLine`, `CaptionTrack`, `ExtractedTrack`, `WindowSize` y `DubConfig`
-- [ ] 1.5 Crear `utils/storage.ts` con `storage.defineItem` para `local:apiKey`, `local:config`, `local:captions:<videoId>:<lang>` y `local:dub:<videoId>:<lang>:<promptVersion>`
+- [ ] 1.5 Crear `utils/storage.ts` importando `{ storage }` de `wxt/storage`, y definir con `storage.defineItem` los items `local:apiKey` (`{ fallback: '' }`), `local:config` (con `fallback` al objeto de configuración por defecto), `local:captions:<videoId>:<lang>` y `local:dub:<videoId>:<lang>:<promptVersion>`; usar `fallback` y no `defaultValue` (obsoleto), y componer las claves dinámicas con plantillas literales para que infieran el tipo `StorageItemKey`
 - [ ] 1.6 Crear `utils/bridge.ts` con los nombres de los `CustomEvent`, los tipos de payload y los helpers `emit`/`on` con validación de forma
 - [ ] 1.7 Verificar que `npm run build` genera un manifiesto válido y que `tsc --noEmit` pasa
 
@@ -12,7 +12,7 @@
 
 - [ ] 2.1 Sustituir el contador de `entrypoints/popup/App.tsx` por el formulario de configuración: API key (input enmascarado con botón de revelar), idioma destino, nivel de compresión, idioma origen
 - [ ] 2.2 Implementar el guardado de la API key en `local:apiKey` con confirmación visual en el popup
-- [ ] 2.3 Implementar "probar conexión": llamada mínima a `generativelanguage.googleapis.com` desde el background, con mensaje de éxito o de error (key inválida, sin permisos, cuota)
+- [ ] 2.3 Implementar "probar conexión": `GET /v1beta/models` con la cabecera `x-goog-api-key` (no consume tokens), con mensaje de éxito o de error (key inválida, sin permisos, cuota)
 - [ ] 2.4 Implementar el selector de idioma destino con la lista `es-ES`, `es-MX`, `es-419`, `pt-BR`, `en-US` y rechazo de valores no soportados
 - [ ] 2.5 Persistir el idioma destino y el nivel de compresión en `local:config` y verificar que persisten tras reiniciar el navegador
 - [ ] 2.6 Mostrar en el popup el estado de la última traducción (etapa, ventanas procesadas, error) leyéndolo del estado compartido
@@ -37,7 +37,8 @@
 
 - [ ] 4.1 Implementar `composables/budget.ts` con `budgetWords(durationSec)` = `floor(dur × 2,9 × 0,92)` y mínimo de 1 palabra
 - [ ] 4.2 Implementar `composables/ai/prompt.ts` con el system instruction: traducir al español natural, respetar el presupuesto, orden de recorte (muletillas → redundancias → adverbios), conservar nombres/cifras/fechas/negaciones, permitir fusión y división de cues, y devolver JSON sin etiquetas
-- [ ] 4.3 Implementar `composables/ai/translate.ts` en el background: `POST /v1beta/models/gemini-3.5-flash-lite:generateContent` con `x-goog-api-key`, `responseMimeType: 'application/json'` y el `responseSchema` de `start`/`end`/`text`/`words`/`source`
+- [ ] 4.3 Implementar `composables/ai/translate.ts` en el background: `POST /v1beta/interactions` con `x-goog-api-key`, cuerpo `{ model: 'gemini-3.5-flash-lite', input, system_instruction, response_format: { type: 'text', mime_type: 'application/json', schema }, generation_config: { thinking_level: 'minimal' }, store: false }`, y lectura del texto en `steps[].content[].text` del paso `model_output`
+- [ ] 4.4 Implementar el esquema JSON Schema estándar de la respuesta (array de objetos con `start`, `end`, `text`, `words`, `source`, tipos en minúsculas) como constante exportada y reutilizable
 - [ ] 4.4 Implementar la validación del resultado: presupuesto por línea, `end > start`, monotonía, no solape y texto no vacío
 - [ ] 4.5 Implementar el reintento con instrucción reforzada y la degradación final al texto original del cue
 - [ ] 4.6 Implementar el troceado en ventanas de 120 s con look-ahead de 45 s y el contexto de cola de ~10 s de la ventana anterior

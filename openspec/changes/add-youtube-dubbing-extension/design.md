@@ -93,14 +93,21 @@ Restricciones de plataforma relevantes:
 
 **Consecuencia:** el prompt permite **fusionar** cues contiguos (devolviendo los índices originales en `source`) y **dividir** cues largos. Es la palanca que hace que el presupuesto sea alcanzable sin mutilar el contenido.
 
-### D7 · Structured output en lugar de parsear texto libre
-**Qué:** `generationConfig.responseMimeType: "application/json"` con `responseSchema` que exige `start`, `end`, `text`, `words` y `source`.
+### D7 · Interactions API con structured output, sin SDK
+**Qué:** la llamada se hace por HTTP directo contra `POST https://generativelanguage.googleapis.com/v1beta/interactions`, con la cabecera `x-goog-api-key`, el cuerpo `{ model, input, system_instruction, response_format, generation_config, store }` y `response_format: { type: 'text', mime_type: 'application/json', schema }` donde `schema` es **JSON Schema estándar** (tipos en minúsculas: `object`, `array`, `string`, `number`, `integer`) que exige `start`, `end`, `text`, `words` y `source`. La respuesta se lee de `steps[].content[].text` en el paso de tipo `model_output`. Sin SDK: `fetch` nativo desde el service worker.
 
-**Por qué:** con `responseSchema` el modelo no puede devolver una estructura que rompa el parser, y `start`/`end` propios del modelo permiten **fusionar cues**, que es imposible si el contrato obliga a devolver un timestamps por cue de origen.
+**Por qué:** con `schema` el modelo no puede devolver una estructura que rompa el parser, y `start`/`end` propios del modelo permiten **fusionar cues**, que es imposible si el contrato obliga a devolver un timestamps por cue de origen. JSON Schema estándar evita el subconjunto OpenAPI con tipos en mayúsculas, que es la fuente habitual de errores al escribir el esquema a mano.
 
-**Alternativas descartadas:** parsear JSON a mano desde un texto con markdown; instruir "devuelve solo JSON" sin schema → ambos fallan de forma intermitente y obligan a reintentar a ciegas.
+**Por qué Interactions API y no `generateContent`:** desde junio de 2026 es GA y la API recomendada para proyectos nuevos; `generateContent` sigue soportada pero se considera **legacy** y todos los modelos nuevos se publican primero en Interactions. `gemini-3.5-flash-lite` está en la lista de modelos soportados por `CreateInteraction`.
 
-**Consecuencia:** la validación de cliente se centra en el **contenido** (presupuesto, monotonía, solapes), no en la forma.
+**Por qué sin SDK:** cero dependencias nuevas (el proyecto solo tiene `solid-js`); control total del cuerpo de la petición, del timeout (`AbortSignal`) y del mapeo de errores (`{ error: { code, message, status } }`); y el bundle del service worker no arrastra una librería con rutas de código de Node.
+
+**Alternativas descartadas:**
+- `@google/genai` → añade una dependencia grande a un service worker MV3, y su propia documentación advierte de exponer la key en cliente; el control del `response_format` y del `AbortSignal` se pierde.
+- `generateContent` con `generationConfig.responseSchema` → legacy; además exige el dialecto OpenAPI (`"type": "ARRAY"`, `"type": "OBJECT"`) en lugar de JSON Schema estándar.
+- Parsear JSON a mano desde un texto con markdown; instruir "devuelve solo JSON" sin schema → ambos fallan de forma intermitente y obligan a reintentar a ciegas.
+
+**Consecuencia:** la validación de cliente se centra en el **contenido** (presupuesto, monotonía, solapes), no en la forma. Además se envía `store: false` para que los subtítulos del usuario no se guarden en el servidor (en free tier las interacciones se retienen 1 día por defecto; en paid, 55) y `generation_config.thinking_level: 'minimal'` para minimize latencia y coste, ya que la traducción no requiere razonamiento.
 
 ### D8 · Ventanas de 120 s con look-ahead de 45 s
 **Qué:** la pista se divide en ventanas de 120 s; cada una se pide cuando la reproducción entra en los 45 s previos a su inicio. Cada ventana incluye como contexto las últimas líneas de la anterior.
@@ -133,7 +140,7 @@ Restricciones de plataforma relevantes:
 - Llamar a Gemini desde el content script → la key tendría que estar disponible en el isolated world, y una página con XSS o una extensión con Broadly-scoped permission podría leerla.
 - `storage.sync` para la key → los datos sincronizados salen del dispositivo; la key no debería viajar.
 
-**Consecuencia:** la interfaz tiene que distinguir "falta la key" de "falló la API", y ofrecer un acceso directo a la configuración.
+**Consecuencia:** la interfaz tiene que distinguir "falta la key" de "falló la API", y ofrecer un acceso directo a la configuración. La comprobación de conexión usa `GET /v1beta/models` con la misma cabecera, que **no consume tokens**; el popup distingue el 401/403 (key inválida o sin permisos) del 429 (cuota) y de los errores de red.
 
 ### D11 · La pantalla de subtítulos es una shadow root, no un elemento del DOM de YouTube
 **Qué:** el overlay se monta con `createShadowRootUi` de WXT, en su propio contenedor sobre el reproductor.
@@ -159,6 +166,10 @@ Restricciones de plataforma relevantes:
 - **[Cuota de `storage.local` (5 MB)** → los cues se cachean por vídeo y el guion adaptado por vídeo + versión de prompt. No se cachea audio (queda fuera de este cambio). Si una pista muy larga saturara la cuota, se recurre a `storage.session`.
 
 - **[El modelo de la API cambia o se renombra]** → se usa `gemini-3.5-flash-lite`, que es el alias estable recomendado, y la versión de prompt cacheada incluye la identidad del modelo.
+
+- **[La Interactions API sigue en evolución]** → es GA desde junio de 2026 pero el contrato puede evolucionar; `generateContent` sigue soportada como plan B. Mitigación: toda la llamada a Gemini vive en un único módulo (`composables/ai/translate.ts`), así que cambiar de superficie de API afecta a un solo fichero.
+
+- **[La key se filtra]** → la documentación de Google recomienda un proxy backend para aplicaciones cliente, pero aquí el "cliente" es el service worker de una extensión instalada por el usuario: la key vive en su perfil local, nunca en un bundle público ni en la página de YouTube. Aun así, es una key BYO: si se filtra, el consumo va a la cuenta del usuario. Mitigación: restricción "solo Gemini API" por defecto en AI Studio, alertas de facturación, y el popup avisa de que la key se guarda en local y no viaja entre dispositivos.
 
 - **[Trade-off: entrega progresiva frente a coherencia global]** → las ventanas se traducen de forma independiente, así que una frase que cruza la frontera puede sonar partida. Se mitiga con el contexto de cola; se acepta porque la alternativa (traducir todo antes de empezar) arruina la experiencia.
 
